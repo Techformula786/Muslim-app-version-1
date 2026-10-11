@@ -1,0 +1,65 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Connection test document
+    match /_connection_test_/{docId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // User profile and leaderboard
+    match /users/{userId} {
+      // Readable for all users to render leaderboard and profile karma
+      allow read: if true;
+      // Users can manage their own profile document
+      allow create, update: if isSignedIn() && request.auth.uid == userId;
+      allow delete: if false;
+
+      // Subcollection for daily mosque check-ins
+      match /checkins/{checkinId} {
+        allow read, write: if isSignedIn() && request.auth.uid == userId;
+      }
+    }
+
+    // Community Duas on Dua Wall
+    match /duas/{duaId} {
+      // Publicly readable for all Muslims
+      allow read: if true;
+      // Authenticated users can create duas where authorUid matches
+      allow create: if isSignedIn() && request.resource.data.authorUid == request.auth.uid;
+      // Allow updates for Ameen counter, likedBy list, or author updates
+      allow update: if isSignedIn();
+      // Only the author can delete their dua
+      allow delete: if isSignedIn() && resource.data.authorUid == request.auth.uid;
+
+      // Subcollection for replies to duas
+      match /replies/{replyId} {
+        allow read: if true;
+        allow create: if isSignedIn() && request.resource.data.authorUid == request.auth.uid;
+        allow update, delete: if isSignedIn() && resource.data.authorUid == request.auth.uid;
+      }
+    }
+
+    // Spiritual challenges
+    match /challenges/{challengeId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // System settings (e.g. Makkah/Madinah live stream URLs)
+    match /system_settings/{settingId} {
+      allow read: if true;
+      allow write: if true;
+    }
+  }
+}

@@ -1,0 +1,105 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "User Profile",
+      "description": "User profile containing karma points, deed levels, and display information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "karmaPoints": { "type": "number" },
+        "level": { "type": "string" }
+      },
+      "required": ["uid", "karmaPoints"]
+    },
+    "UserCheckin": {
+      "title": "Mosque Checkin",
+      "description": "Daily mosque attendance check-in records",
+      "type": "object",
+      "properties": {
+        "count": { "type": "number" },
+        "lastCheckedIn": { "type": "string" }
+      },
+      "required": ["count"]
+    },
+    "DuaPost": {
+      "title": "Community Dua Post",
+      "description": "A prayer shared on the global Ummah Dua Wall",
+      "type": "object",
+      "properties": {
+        "content": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "authorName": { "type": "string" },
+        "isAnonymous": { "type": "boolean" },
+        "ameenCount": { "type": "number" },
+        "likedBy": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["content", "authorUid", "authorName"]
+    },
+    "DuaReply": {
+      "title": "Dua Reply",
+      "description": "A supportive reply or ameen comment to a dua post",
+      "type": "object",
+      "properties": {
+        "content": { "type": "string" },
+        "authorUid": { "type": "string" },
+        "authorName": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["content", "authorUid", "authorName"]
+    },
+    "ChallengeItem": {
+      "title": "Spiritual Challenge",
+      "description": "Available good deeds and Islamic challenges",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "points": { "type": "number" },
+        "category": { "type": "string" }
+      },
+      "required": ["title", "points"]
+    },
+    "SystemSettings": {
+      "title": "System Settings",
+      "description": "Global app configurations such as live stream URLs",
+      "type": "object",
+      "properties": {
+        "makkahUrl": { "type": "string" },
+        "madinahUrl": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profiles and karma points for community leaderboard"
+    },
+    "/users/{userId}/checkins/{checkinId}": {
+      "schema": "UserCheckin",
+      "description": "Daily mosque check-in records"
+    },
+    "/duas/{duaId}": {
+      "schema": "DuaPost",
+      "description": "Global community prayer wall posts"
+    },
+    "/duas/{duaId}/replies/{replyId}": {
+      "schema": "DuaReply",
+      "description": "Replies and comments on community dua posts"
+    },
+    "/challenges/{challengeId}": {
+      "schema": "ChallengeItem",
+      "description": "Catalog of spiritual challenges and deeds"
+    },
+    "/system_settings/{settingId}": {
+      "schema": "SystemSettings",
+      "description": "App settings including admin-managed live streams"
+    }
+  }
+}

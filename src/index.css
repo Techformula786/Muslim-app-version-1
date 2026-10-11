@@ -1,0 +1,124 @@
+@import url('https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,400;0,700;1,400;1,700&family=Inter:wght@400;500;600;700;800;900&family=Noto+Nastaliq+Urdu:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800;900&family=Scheherazade+New:wght@400;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-arabic: "Scheherazade New", "Amiri", serif;
+  --font-urdu: "Noto Nastaliq Urdu", serif;
+  
+  --color-emerald-50: #ecfdf5;
+  --color-emerald-100: #d1fae5;
+  --color-emerald-200: #a7f3d0;
+  --color-emerald-300: #6ee7b7;
+  --color-emerald-400: #34d399;
+  --color-emerald-500: #10b981;
+  --color-emerald-600: #059669;
+  --color-emerald-700: #047857;
+  --color-emerald-800: #065f46;
+  --color-emerald-900: #064e3b;
+  --color-emerald-950: #022c22;
+
+  --color-gold-50: #fffbeb;
+  --color-gold-100: #fef3c7;
+  --color-gold-200: #fde68a;
+  --color-gold-300: #fcd34d;
+  --color-gold-400: #fbbf24;
+  --color-gold-500: #f59e0b;
+  --color-gold-600: #d97706;
+  --color-gold-700: #b45309;
+  --color-gold-800: #92400e;
+  --color-gold-900: #78350f;
+
+  @keyframes float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-10px); }
+  }
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  @keyframes pulse-glow {
+    0%, 100% { opacity: 0.5; filter: blur(20px); }
+    50% { opacity: 0.8; filter: blur(30px); }
+  }
+
+  --theme-primary: var(--color-emerald-500);
+  --theme-secondary: var(--color-gold-400);
+  --theme-accent: var(--color-gold-600);
+  --theme-background: #f8f9fb;
+  --theme-surface: #ffffff;
+  --theme-text: #1e293b;
+  --theme-text-muted: #64748b;
+  --theme-border: #f1f5f9;
+  --theme-pattern-opacity: 0.05;
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.animate-shimmer {
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}
+
+.animate-glow {
+  animation: pulse-glow 4s ease-in-out infinite;
+}
+
+body {
+  background-color: var(--theme-background);
+  color: var(--theme-text);
+  @apply antialiased;
+}
+
+.font-arabic {
+  font-family: var(--font-arabic);
+}
+
+/* Islamic Geometric Pattern */
+.bg-islamic-pattern {
+  background-color: currentColor;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cg fill='%23ffffff' fill-opacity='0.05'%3E%3Cpath d='M0 0h80v80H0z'/%3E%3Cpath d='M40 0l40 40-40 40L0 40 40 0zm0 10L10 40l30 30 30-30-30-30zm0 10l20 20-20 20-20-20 20-20z'/%3E%3C/g%3E%3C/svg%3E");
+  opacity: var(--theme-pattern-opacity);
+}
+
+.bg-islamic-pattern-dark {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80'%3E%3Cg fill='%23000000' fill-opacity='0.03'%3E%3Cpath d='M0 0h80v80H0z'/%3E%3Cpath d='M40 0l40 40-40 40L0 40 40 0zm0 10L10 40l30 30 30-30-30-30zm0 10l20 20-20 20-20-20 20-20z'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+.glass {
+  background-color: var(--theme-surface);
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--theme-border);
+  @apply shadow-xl shadow-slate-200/50;
+}
+
+.glass-dark {
+  @apply bg-slate-900/80 backdrop-blur-xl border border-white/10 shadow-2xl shadow-black/20;
+}
+
+.gold-gradient {
+  background: linear-gradient(135deg, #fcd34d 0%, #d97706 100%);
+}
+
+.emerald-gradient {
+  background: linear-gradient(135deg, #10b981 0%, #065f46 100%);
+}
+
+.text-gold-premium {
+  @apply bg-clip-text text-transparent bg-gradient-to-br from-gold-300 via-gold-500 to-gold-700;
+}
+
+.islamic-glow {
+  box-shadow: 0 0 30px rgba(16, 185, 129, 0.2);
+}
+
+.islamic-glow-gold {
+  box-shadow: 0 0 30px rgba(245, 158, 11, 0.2);
+}
+
+::-webkit-scrollbar {
+  width: 0px;
+}

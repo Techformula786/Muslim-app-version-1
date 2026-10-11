@@ -1,0 +1,12 @@
+{
+  "name": "Remix Nur Al-Islam",
+  "description": "Comprehensive Islamic app featuring the Holy Quran (Para-wise and Surah-wise) with Arabic text, line-by-line Urdu translation, Mishary Alafasy audio recitation, and AI assistant.",
+  "requestFramePermissions": [
+    "geolocation",
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

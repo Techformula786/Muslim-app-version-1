@@ -1,0 +1,1012 @@
+import { useState, useEffect, useMemo } from 'react';
+import { format, subDays, startOfDay } from 'date-fns';
+import { usePrayer } from './PrayerProvider';
+import { Clock, MapPin, ChevronRight, Settings as SettingsIcon, Fingerprint, Heart, BookOpen, Quote, Check, Share2, Star, Sun, Moon, Sparkles, Book, Search, VolumeX, Play, MessageSquare, Radio, Activity, Target, ShieldCheck, Trophy, Zap, LogIn, LogOut, BarChart2, Calculator, Compass, RotateCw, Mic, PenTool, Baby, Brain, ShoppingBag } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { cn, safeGetHijriDate } from '../lib/utils';
+import { useNavigate } from 'react-router-dom';
+import { RubElHizb, CrescentStar, IslamicPattern } from './DecorativeIcons';
+import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
+import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
+import { doc, onSnapshot, setDoc, getDoc } from 'firebase/firestore';
+import { awardKarma } from '../lib/karma';
+import { useToast } from './ToastContext';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+
+const DAILY_HADITHS = [
+  { text: "The best among you are those who have the best manners and character.", source: "Sahih al-Bukhari 6035", narrator: "Prophet Muhammad ﷺ" },
+  { text: "None of you truly believes until he loves for his brother what he loves for himself.", source: "Sahih al-Bukhari 13", narrator: "Prophet Muhammad ﷺ" },
+  { text: "A kind and noble word is a form of charity (Sadaqah).", source: "Sahih al-Bukhari 2989", narrator: "Prophet Muhammad ﷺ" },
+  { text: "The most beloved of deeds to Allah are those that are most consistent, even if small.", source: "Sahih Muslim 782", narrator: "Prophet Muhammad ﷺ" },
+  { text: "He who is not merciful to others will not be shown mercy.", source: "Sahih al-Bukhari 5997", narrator: "Prophet Muhammad ﷺ" }
+];
+
+const DAILY_DUAS = [
+  { title: "Dua for Protection", arabic: "بِسْمِ اللَّهِ الَّذِي لَا يَضُرُّ مَعَ اسْمِهِ شَيْءٌ فِي الْأَرْضِ وَلَا فِي السَّمَاءِ وَهُوَ السَّمِيعُ الْعَلِيمُ", meaning: "In the Name of Allah with Whose Name there is protection against every kind of harm..." },
+  { title: "Dua for Forgiveness", arabic: "رَبَّنَا اغْفِرْ لَنَا ذُنُوبَنَا وَإِسْرَافَنَا فِي أَمْرِنَا", meaning: "Our Lord! Forgive us our sins and our transgressions..." },
+  { title: "Dua for Knowledge", arabic: "رَّبِّ زِدْنِي عِلْمًا", meaning: "My Lord, increase me in knowledge." },
+  { title: "Dua for Parents", arabic: "رَّبِّ ارْحَمْهُمَا كَمَا رَبَّيَانِي صَغِيرًا", meaning: "My Lord, have mercy upon them as they brought me up..." }
+];
+
+export default function Home() {
+  const { times, location, isAdhanPlaying, stopAdhan, prayerHistory, checkInPrayer, isMosqueModeActive } = usePrayer();
+  const { showSuccess, showError, showInfo } = useToast();
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const navigate = useNavigate();
+  const [searchQuery, setSearchQuery] = useState('');
+  const [userKarma, setUserKarma] = useState<any>(null);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isSharing, setIsSharing] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [user, setUser] = useState(auth.currentUser);
+  const [showChart, setShowChart] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = auth.onAuthStateChanged((u) => setUser(u));
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogin = async () => {
+    if (isLoggingIn) return;
+    setIsLoggingIn(true);
+    setAuthError(null);
+    const provider = new GoogleAuthProvider();
+    try {
+      await signInWithPopup(auth, provider);
+      showSuccess("Welcome! Successfully signed in.");
+    } catch (error: any) {
+      console.error("Login failed:", error);
+      if (error.code === 'auth/popup-blocked') {
+        showError("Popup was blocked by the browser. Please allow popups for sign-in.");
+      } else if (error.code === 'auth/cancelled-popup-request') {
+        // Ignore cancellation
+      } else {
+        showError("Sign-in could not be completed. Please try again.");
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    
+    const userRef = doc(db, 'users', auth.currentUser.uid);
+    const unsubscribe = onSnapshot(userRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setUserKarma(docSnap.data());
+      } else {
+        // Initialize user if not exists
+        setDoc(userRef, {
+          uid: auth.currentUser?.uid,
+          displayName: auth.currentUser?.displayName || 'User',
+          karmaPoints: 0,
+          level: 'Novice'
+        }).catch(err => handleFirestoreError(err, OperationType.WRITE, `users/${auth.currentUser?.uid}`));
+      }
+    }, (error) => {
+      handleFirestoreError(error, OperationType.GET, `users/${auth.currentUser?.uid}`);
+    });
+    
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const timer = setInterval(() => setCurrentTime(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const dailyHadith = useMemo(() => {
+    const day = new Date().getDate();
+    return DAILY_HADITHS[day % DAILY_HADITHS.length];
+  }, []);
+
+  const duaOfTheDay = useMemo(() => {
+    const day = new Date().getDate();
+    return DAILY_DUAS[day % DAILY_DUAS.length];
+  }, []);
+
+  // Spiritual Progress State (Persisted in localStorage)
+  const [prayersDone, setPrayersDone] = useState<string[]>(() => {
+    const saved = localStorage.getItem('prayersDone');
+    return saved ? JSON.parse(saved) : [];
+  });
+
+  useEffect(() => {
+    localStorage.setItem('prayersDone', JSON.stringify(prayersDone));
+  }, [prayersDone]);
+
+  const hijriDate = useMemo(() => {
+    return safeGetHijriDate(currentTime, { day: 'numeric', month: 'long', year: 'numeric' });
+  }, [currentTime]);
+
+  const chartData = useMemo(() => {
+    const data = [];
+    for (let i = 6; i >= 0; i--) {
+      const date = subDays(new Date(), i);
+      const dateKey = format(date, 'yyyy-MM-dd');
+      const dayHistory = prayerHistory[dateKey] || {};
+      const count = Object.values(dayHistory).filter(Boolean).length;
+      data.push({
+        name: format(date, 'EEE'),
+        count,
+        fullDate: dateKey
+      });
+    }
+    return data;
+  }, [prayerHistory]);
+
+  if (!times) return (
+    <div className="flex flex-col items-center justify-center h-screen gap-4">
+      <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+      <p className="text-slate-500 font-medium">Calculating prayer times...</p>
+    </div>
+  );
+
+  const prayerList = [
+    { name: 'Fajr', time: times.fajr },
+    { name: 'Sunrise', time: times.sunrise },
+    { name: 'Dhuhr', time: times.dhuhr },
+    { name: 'Asr', time: times.asr },
+    { name: 'Maghrib', time: times.maghrib },
+    { name: 'Isha', time: times.isha },
+  ];
+
+  const currentPrayer = times.current === 'none' ? 'Isha' : times.current;
+
+  const togglePrayer = (name: string) => {
+    checkInPrayer(name.toLowerCase());
+    awardKarma(10);
+  };
+
+  const handleMosqueCheckIn = async () => {
+    if (!auth.currentUser) {
+      showInfo("Please sign in with Google to check in at the mosque and earn good deed points.");
+      return;
+    }
+    const today = format(new Date(), 'yyyy-MM-dd');
+    const checkinRef = doc(db, 'users', auth.currentUser.uid, 'checkins', today);
+    
+    try {
+      const checkinDoc = await getDoc(checkinRef);
+      const count = checkinDoc.exists() ? checkinDoc.data().count : 0;
+      
+      if (count >= 5) {
+        showInfo("MashaAllah! You've already checked in 5 times today. Daily limit reached.");
+        return;
+      }
+      
+      await setDoc(checkinRef, {
+        count: count + 1,
+        lastCheckin: new Date().toISOString()
+      }, { merge: true });
+      
+      await awardKarma(100);
+      showSuccess(`MashaAllah! Mosque check-in successful (${count + 1}/5). +100 Points!`);
+    } catch (e) {
+      console.error(e);
+      handleFirestoreError(e, OperationType.WRITE, `users/${auth.currentUser.uid}/checkins/${today}`);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-6 bg-[#fcfcfd] min-h-full pb-24">
+      {/* Premium Header (Non-sticky as per user request to avoid overlap) */}
+      <header className="bg-white/80 backdrop-blur-xl border-b border-slate-100 p-6 z-50 shadow-sm overflow-hidden">
+        <IslamicPattern className="opacity-[0.03]" />
+        <div className="flex items-center justify-between relative z-10">
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-emerald-600 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-200 rotate-3 group hover:rotate-0 transition-transform duration-500">
+                <RubElHizb className="w-6 h-6 text-white" />
+              </div>
+              <motion.h1 
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                className="text-2xl font-black text-slate-800 tracking-tight leading-none"
+              >
+                Assalamu Alaikum
+              </motion.h1>
+            </div>
+            <motion.div 
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: 0.1 }}
+              className="flex items-center gap-2 mt-1"
+            >
+              <p className="text-emerald-600 text-[10px] font-black uppercase tracking-[0.2em]">
+                {format(currentTime, 'EEEE, d MMMM')}
+              </p>
+              <div className="w-1 h-1 bg-slate-300 rounded-full" />
+              <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">
+                {hijriDate}
+              </p>
+            </motion.div>
+          </div>
+          <div className="flex gap-2">
+            {user ? (
+              <motion.button 
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handleLogout}
+                className="w-12 h-12 glass rounded-2xl flex items-center justify-center text-rose-500 hover:bg-rose-50 transition-all"
+                title="Logout"
+              >
+                <LogOut size={20} strokeWidth={2.5} />
+              </motion.button>
+            ) : (
+              <motion.button 
+                whileHover={{ scale: 1.05 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={handleLogin}
+                disabled={isLoggingIn}
+                className={cn(
+                  "w-12 h-12 glass rounded-2xl flex items-center justify-center transition-all",
+                  isLoggingIn ? "text-slate-300" : "text-emerald-600 hover:bg-emerald-50"
+                )}
+                title="Login"
+              >
+                <LogIn size={20} strokeWidth={2.5} className={cn(isLoggingIn && "animate-pulse")} />
+              </motion.button>
+            )}
+            <motion.button 
+              id="share-btn-header"
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={async () => {
+                if (isSharing) return;
+                setIsSharing(true);
+                try {
+                  if (navigator.share) {
+                    await navigator.share({
+                      title: 'Islamic Hub',
+                      text: 'Check out this amazing Islamic app!',
+                      url: window.location.href,
+                    });
+                  } else {
+                    await navigator.clipboard.writeText(`Check out this amazing Islamic app! ${window.location.href}`);
+                    showSuccess("Link copied to clipboard!");
+                  }
+                } catch (error: any) {
+                  if (error.name !== 'AbortError') {
+                    console.error('Error sharing:', error);
+                  }
+                } finally {
+                  setIsSharing(false);
+                }
+              }}
+              className="w-12 h-12 glass rounded-2xl flex items-center justify-center text-slate-500 hover:text-emerald-600 transition-all"
+            >
+              <Share2 size={20} strokeWidth={2.5} />
+            </motion.button>
+            <motion.button 
+              whileHover={{ scale: 1.05, rotate: 5 }}
+              whileTap={{ scale: 0.95 }}
+              onClick={() => navigate('/settings')}
+              className="w-12 h-12 glass rounded-2xl flex items-center justify-center text-slate-500 hover:text-emerald-600 transition-all"
+            >
+              <SettingsIcon size={22} strokeWidth={2.5} />
+            </motion.button>
+          </div>
+        </div>
+
+        {/* Optimized Search Bar */}
+        <div className="mt-6 relative group">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-emerald-500 transition-colors" size={20} />
+          <input 
+            type="text" 
+            placeholder="Search mosque, halal food, or place..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && searchQuery.trim()) {
+                navigate(`/nearby?q=${encodeURIComponent(searchQuery)}`);
+              }
+            }}
+            className="w-full bg-slate-50/50 border border-slate-100 rounded-[24px] py-4 pl-12 pr-16 text-sm font-medium focus:outline-none focus:ring-4 focus:ring-emerald-500/10 focus:bg-white transition-all shadow-sm"
+          />
+          <button 
+            onClick={() => searchQuery.trim() && navigate(`/nearby?q=${encodeURIComponent(searchQuery)}`)}
+            className="absolute right-2 top-1/2 -translate-y-1/2 bg-emerald-600 text-white px-5 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-emerald-500 transition-all shadow-lg shadow-emerald-200"
+          >
+            Search
+          </button>
+        </div>
+      </header>
+
+      {/* Features Horizontal Scroll - Compact, high-value, categorized */}
+      <div className="flex gap-2.5 overflow-x-auto no-scrollbar pb-2 px-5">
+        {[
+          { id: 'quran', title: 'Holy Quran', icon: BookOpen, color: 'bg-emerald-600', iconColor: 'text-white', path: '/quran', description: 'Paras & Surahs' },
+          { id: 'duas', title: 'Dua Hub', icon: Heart, color: 'bg-rose-500', iconColor: 'text-white', path: '/duas', description: 'Masnoon & Wall', isHighlighted: true },
+          { id: 'tracker', title: 'Salah Streak', icon: Clock, color: 'bg-emerald-700', iconColor: 'text-white', path: '/tracker', description: 'Prayer Log' },
+          { id: 'ai-suite', title: 'AI Assistant', icon: Sparkles, color: 'bg-emerald-950', iconColor: 'text-white', path: '/ai', description: 'Islamic Q&A', isAi: true },
+          { id: 'live', title: 'Live Stream', icon: Radio, color: 'bg-blue-50', iconColor: 'text-blue-600', path: '/live', description: 'Makkah 24/7' },
+          { id: 'qibla', title: 'Qibla AR', icon: Compass, color: 'bg-slate-900', iconColor: 'text-white', path: '/qibla', description: '3D Compass' },
+          { id: 'tasbih', title: 'Tasbih', icon: Fingerprint, color: 'bg-teal-50', iconColor: 'text-teal-700', path: '/tasbih', description: 'Digital Dhikr' },
+          { id: 'azkar', title: 'Azkar', icon: Moon, color: 'bg-indigo-50', iconColor: 'text-indigo-600', path: '/azkar', description: 'Morning/Evening' },
+          { id: 'hadith', title: 'Hadith', icon: Quote, color: 'bg-amber-50', iconColor: 'text-amber-700', path: '/hadith', description: 'Sahih Collections' },
+          { id: 'nearby', title: 'Masjids & Halal', icon: MapPin, color: 'bg-emerald-50', iconColor: 'text-emerald-600', path: '/nearby', description: 'Nearby' },
+          { id: 'zakat', title: 'Zakat Calculator', icon: Calculator, color: 'bg-amber-50', iconColor: 'text-amber-700', path: '/zakat', description: 'Nisab & Wealth' },
+        ].map((feature) => (
+          <motion.button
+            key={feature.id}
+            whileHover={{ y: -3, scale: 1.03 }}
+            whileTap={{ scale: 0.96 }}
+            onClick={() => navigate(feature.path)}
+            className={`p-3 rounded-2xl border transition-all flex flex-col gap-2 relative overflow-hidden min-w-[105px] max-w-[125px] shrink-0 text-left shadow-sm ${
+              (feature as any).isAi
+                ? 'bg-gradient-to-br from-emerald-900 via-slate-900 to-emerald-950 text-white border-emerald-500/40 shadow-emerald-900/20'
+                : 'bg-white border-slate-100 hover:border-emerald-100 hover:shadow-md'
+            }`}
+          >
+            <div className="flex items-center justify-between">
+              <div className={cn(
+                "w-9 h-9 rounded-xl flex items-center justify-center transition-all shadow-inner",
+                feature.color,
+                feature.iconColor
+              )}>
+                <feature.icon size={18} />
+              </div>
+              {(feature as any).isAi && (
+                <span className="text-[8px] font-black uppercase tracking-wider bg-emerald-500/30 text-emerald-300 px-1.5 py-0.5 rounded-full border border-emerald-400/30">
+                  AI
+                </span>
+              )}
+            </div>
+
+            <div className="relative z-10 min-w-0">
+              <p className={`font-black tracking-tight text-xs truncate ${
+                (feature as any).isAi ? 'text-white' : 'text-slate-900'
+              }`}>
+                {feature.title}
+              </p>
+              <p className={`text-[9px] font-bold uppercase tracking-wider truncate ${
+                (feature as any).isAi ? 'text-emerald-300/80' : 'text-slate-400'
+              }`}>
+                {feature.description}
+              </p>
+            </div>
+          </motion.button>
+        ))}
+      </div>
+
+      <div className="px-6 flex flex-col gap-6">
+        
+      {/* Stop Adhan Button */}
+      <AnimatePresence>
+        {isAdhanPlaying && (
+          <motion.div
+            initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+            animate={{ opacity: 1, height: 'auto', marginBottom: 24 }}
+            exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+            className="overflow-hidden"
+          >
+            <button
+              onClick={stopAdhan}
+              className="w-full bg-rose-500 text-white p-6 rounded-[32px] shadow-xl shadow-rose-200 flex items-center justify-between group hover:bg-rose-600 transition-all"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-white/20 rounded-2xl flex items-center justify-center animate-pulse">
+                  <VolumeX size={24} />
+                </div>
+                <div className="text-left">
+                  <p className="text-[10px] font-black uppercase tracking-[0.2em] opacity-80">Adhan is playing</p>
+                  <p className="text-lg font-black tracking-tight">Stop Adhan Sound</p>
+                </div>
+              </div>
+              <div className="bg-white/20 px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest group-hover:bg-white/30 transition-colors">
+                Dismiss
+              </div>
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* 3D Motion Quran Feature Banner */}
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        onClick={() => navigate('/quran')}
+        className="bg-gradient-to-br from-emerald-950 via-emerald-900 to-teal-950 rounded-[44px] p-7 text-white relative overflow-hidden shadow-2xl shadow-emerald-950/20 border border-emerald-500/30 cursor-pointer group hover:scale-[1.01] transition-all"
+      >
+        <div className="absolute inset-0 bg-islamic-pattern opacity-10" />
+        <div className="absolute -right-8 -bottom-8 w-44 h-44 bg-emerald-500/20 rounded-full blur-2xl group-hover:scale-125 transition-transform" />
+        
+        <div className="relative z-10 flex items-center justify-between">
+          <div className="space-y-3 max-w-[260px]">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-black uppercase tracking-[0.2em] bg-white/10 text-emerald-300 px-3 py-1 rounded-full border border-white/10 flex items-center gap-1.5 backdrop-blur-md">
+                <Sparkles size={11} className="text-amber-300" /> Complete 30 Paras & 114 Surahs
+              </span>
+            </div>
+            <div>
+              <h3 className="text-2xl font-black tracking-tight text-white flex items-center gap-2">
+                The Holy Quran
+              </h3>
+              <p className="text-xs text-emerald-100/90 font-medium mt-1">
+                Line-by-line authentic Urdu translation & Sheikh Mishary Alafasy audio recitation.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <span className="px-3.5 py-1.5 bg-emerald-500 text-white rounded-xl text-xs font-black uppercase tracking-wider flex items-center gap-1.5 group-hover:bg-emerald-400 transition-colors shadow-lg shadow-emerald-900/40">
+                <BookOpen size={14} /> Open Quran
+              </span>
+              <span className="text-[11px] text-amber-300 font-bold">
+                Free & Open APIs
+              </span>
+            </div>
+          </div>
+
+          <div className="text-right">
+            <div className="w-16 h-16 rounded-3xl bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center text-amber-300 shadow-xl group-hover:rotate-6 transition-transform mx-auto">
+              <RubElHizb className="w-8 h-8" />
+            </div>
+            <p className="text-xs font-arabic text-amber-200 mt-2 font-bold">القرآن الكريم</p>
+          </div>
+        </div>
+      </motion.section>
+
+      {/* Karma & Good Deeds Section */}
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-gradient-to-br from-amber-500 to-orange-600 rounded-[48px] p-8 text-white relative overflow-hidden shadow-2xl shadow-orange-200"
+      >
+        <div className="absolute inset-0 bg-islamic-pattern opacity-10" />
+        <div className="relative z-10 flex items-center justify-between">
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Trophy size={20} className="text-amber-200" />
+              <h3 className="text-[11px] font-black text-amber-100 uppercase tracking-[0.3em]">Karma & Deeds</h3>
+            </div>
+            <div>
+              <p className="text-4xl font-black tracking-tighter">{userKarma?.karmaPoints || 0}</p>
+              <p className="text-[10px] font-black uppercase tracking-widest text-amber-100/70">Total Points</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="px-3.5 py-1.5 bg-white/20 backdrop-blur-md rounded-xl border border-white/10 flex items-center gap-1.5">
+                <Zap size={14} className="text-amber-300" />
+                <span className="text-xs font-black uppercase tracking-widest">Level {userKarma?.level || 1}</span>
+              </div>
+              <button 
+                onClick={handleMosqueCheckIn}
+                className="px-3.5 py-1.5 bg-emerald-500 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-emerald-900/20 hover:bg-emerald-400 transition-all active:scale-95"
+              >
+                Check-in
+              </button>
+              <button 
+                onClick={() => navigate('/leaderboard')}
+                className="px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-xl text-[10px] font-black uppercase tracking-widest backdrop-blur-md transition-all active:scale-95"
+              >
+                Rank
+              </button>
+              <button 
+                onClick={() => navigate('/tracker')}
+                className="px-3 py-1.5 bg-white/20 hover:bg-white/30 rounded-xl text-[10px] font-black uppercase tracking-widest backdrop-blur-md transition-all active:scale-95"
+              >
+                Streak
+              </button>
+            </div>
+          </div>
+          <div className="relative">
+            <div className="w-24 h-24 rounded-full border-4 border-white/20 flex items-center justify-center relative">
+              <motion.div 
+                animate={{ rotate: 360 }}
+                transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+                className="absolute inset-0 border-4 border-t-amber-300 border-transparent rounded-full"
+              />
+              <Star size={40} className="text-amber-300 fill-amber-300" />
+            </div>
+          </div>
+        </div>
+      </motion.section>
+
+      {/* Hero Prayer Card */}
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ type: "spring", stiffness: 100, damping: 20 }}
+        className="relative overflow-hidden rounded-[48px] bg-slate-900 p-9 text-white shadow-2xl shadow-slate-200 group"
+      >
+        <motion.div 
+          animate={{ backgroundPosition: ["0% 0%", "100% 100%"] }}
+          transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+          className="absolute inset-0 bg-islamic-pattern opacity-10" 
+        />
+        
+        <div className="relative z-10">
+          <div className="flex items-center justify-between mb-8">
+            <div className="bg-emerald-500/20 px-4 py-2 rounded-2xl backdrop-blur-md border border-white/10 flex items-center gap-2">
+              <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse shadow-[0_0_10px_rgba(52,211,153,1)]" />
+              <p className="text-white font-black uppercase tracking-[0.2em] text-[10px]">Next: {times.next}</p>
+            </div>
+            <CrescentStar className="w-8 h-8 text-emerald-400/50 animate-float" />
+          </div>
+          
+          <div className="flex flex-col gap-1 mb-8">
+            <p className="text-emerald-400 text-[10px] font-black uppercase tracking-[0.4em] mb-2">Time Remaining</p>
+            <motion.h2 
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.4 }}
+              className="text-7xl font-black tracking-tighter drop-shadow-2xl"
+            >
+              {times.timeForNext ? (() => {
+                const diff = times.timeForNext.getTime() - currentTime.getTime();
+                if (diff < 0) return "00:00:00";
+                const hours = Math.floor(diff / 3600000);
+                const minutes = Math.floor((diff % 3600000) / 60000);
+                const seconds = Math.floor((diff % 60000) / 1000);
+                return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+              })() : '--:--:--'}
+            </motion.h2>
+          </div>
+
+          <AnimatePresence>
+            {isMosqueModeActive && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 10 }}
+                className="mb-4 bg-emerald-500/20 border border-emerald-500/30 rounded-2xl p-3 flex items-center gap-3"
+              >
+                <div className="w-8 h-8 bg-emerald-500 rounded-xl flex items-center justify-center">
+                  <VolumeX size={16} className="text-white" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-emerald-400">Mosque Mode Active</p>
+                  <p className="text-xs font-bold text-white">Phone is auto-silenced</p>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+
+          <div className="flex items-center justify-between pt-6 border-t border-white/5">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-white/5 rounded-2xl flex items-center justify-center backdrop-blur-md border border-white/10">
+                <Clock size={18} className="text-emerald-400" />
+              </div>
+              <div className="flex flex-col">
+                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Next Adhan</p>
+                <p className="text-sm font-black tracking-tight">{times.timeForNext ? format(times.timeForNext, 'hh:mm a') : '--:--'}</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Current</p>
+              <p className="text-sm font-black tracking-tight text-emerald-400">{currentPrayer}</p>
+            </div>
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Spiritual Progress Tracker */}
+      <motion.section 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.3 }}
+        className="bg-white rounded-[48px] p-8 border border-slate-100 shadow-sm relative overflow-hidden"
+      >
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center gap-2">
+            <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+            <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-[0.3em]">Daily Progress</h3>
+          </div>
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => setShowChart(!showChart)}
+              className="p-2 bg-slate-50 text-slate-500 rounded-xl hover:bg-emerald-50 hover:text-emerald-600 transition-all"
+            >
+              <BarChart2 size={16} />
+            </button>
+            <p className="text-[10px] font-black text-emerald-600 uppercase tracking-widest">
+              {Object.values(prayerHistory[format(new Date(), 'yyyy-MM-dd')] || {}).filter(Boolean).length}/5 Prayers
+            </p>
+          </div>
+        </div>
+
+        <AnimatePresence mode="wait">
+          {showChart ? (
+            <motion.div 
+              key="chart"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 200 }}
+              exit={{ opacity: 0, height: 0 }}
+              className="w-full"
+            >
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis 
+                    dataKey="name" 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fontSize: 10, fontWeight: 700, fill: '#94a3b8' }} 
+                  />
+                  <YAxis hide domain={[0, 5]} />
+                  <Tooltip 
+                    cursor={{ fill: '#f8fafc' }}
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        return (
+                          <div className="bg-white p-3 rounded-2xl shadow-xl border border-slate-100">
+                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">{payload[0].payload.fullDate}</p>
+                            <p className="text-sm font-black text-emerald-600">{payload[0].value} Prayers Done</p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Bar dataKey="count" radius={[10, 10, 10, 10]}>
+                    {chartData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.count === 5 ? '#10b981' : '#34d399'} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </motion.div>
+          ) : (
+            <motion.div 
+              key="buttons"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex justify-between gap-2"
+            >
+              {['Fajr', 'Dhuhr', 'Asr', 'Maghrib', 'Isha'].map((p) => {
+                const isDone = (prayerHistory[format(new Date(), 'yyyy-MM-dd')] || {})[p.toLowerCase()];
+                const prayerTime = times[p.toLowerCase()];
+                const isFuture = prayerTime && new Date() < prayerTime;
+
+                return (
+                  <button 
+                    key={p}
+                    disabled={isFuture || isDone}
+                    onClick={() => togglePrayer(p)}
+                    className={cn(
+                      "flex-1 aspect-square rounded-2xl flex flex-col items-center justify-center gap-1 transition-all border",
+                      isDone 
+                        ? "bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-100" 
+                        : isFuture
+                          ? "bg-slate-50 border-slate-50 text-slate-200 cursor-not-allowed"
+                          : "bg-slate-50 border-slate-100 text-slate-400 hover:border-emerald-200"
+                    )}
+                  >
+                    <p className="text-[8px] font-black uppercase tracking-tighter">{p}</p>
+                    {isDone ? <Check size={14} strokeWidth={3} /> : <div className="w-3.5 h-3.5 rounded-full border-2 border-slate-200" />}
+                  </button>
+                );
+              })}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <div className="mt-6 h-2 bg-slate-50 rounded-full overflow-hidden">
+          <motion.div 
+            className="h-full bg-emerald-500 rounded-full"
+            initial={{ width: 0 }}
+            animate={{ width: `${(Object.values(prayerHistory[format(new Date(), 'yyyy-MM-dd')] || {}).filter(Boolean).length / 5) * 100}%` }}
+          />
+        </div>
+      </motion.section>
+
+      {/* Missed Prayer Warning Feature */}
+      <motion.section
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="bg-[#0a0f1a] rounded-[48px] p-8 text-white relative overflow-hidden border border-white/5 shadow-2xl group"
+      >
+        <div className="absolute inset-0 bg-islamic-pattern opacity-[0.03]" />
+        
+        {/* Realistic Ambient Glow */}
+        <div className="absolute inset-0 pointer-events-none">
+          <motion.div 
+            animate={{ 
+              opacity: prayersDone.length === 5 ? [0.1, 0.2, 0.1] : [0.05, 0.1, 0.05],
+              scale: [1, 1.1, 1],
+            }}
+            transition={{ duration: 5, repeat: Infinity }}
+            className={cn(
+              "absolute -right-20 -top-20 w-96 h-96 rounded-full blur-[100px]",
+              prayersDone.length < 3 ? "bg-rose-500/20" : "bg-emerald-500/20"
+            )}
+          />
+        </div>
+
+        <div className="relative z-10">
+          <div className="flex items-center gap-2 mb-8">
+            <div className={cn(
+              "w-2 h-2 rounded-full animate-pulse shadow-lg",
+              prayersDone.length < 3 ? "bg-rose-500 shadow-rose-500/50" : "bg-emerald-500 shadow-emerald-500/50"
+            )} />
+            <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.4em]">Spiritual Pulse</h3>
+          </div>
+          
+          <div className="flex gap-10 items-center">
+            <div className="flex-1">
+              <h4 className="text-2xl font-black tracking-tight mb-4 leading-tight">
+                {prayersDone.length === 5 
+                  ? "Your soul is bathed in divine light." 
+                  : prayersDone.length >= 3 
+                    ? "Nurture the light within you."
+                    : "The shadows are growing longer."}
+              </h4>
+              <p className="text-sm text-slate-400 leading-relaxed italic mb-8 opacity-70 font-medium">
+                {prayersDone.length < 3 
+                  ? "\"The prayer is a light, and charity is a proof, and patience is illumination.\""
+                  : "\"The coolness of my eyes has been provided in prayer.\""}
+              </p>
+              
+              <div className={cn(
+                "inline-flex items-center gap-3 px-5 py-2.5 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] border transition-all duration-700",
+                prayersDone.length < 3 
+                  ? "bg-rose-500/10 border-rose-500/20 text-rose-400 shadow-[0_0_20px_rgba(244,63,94,0.1)]" 
+                  : "bg-emerald-500/10 border-emerald-500/20 text-emerald-400 shadow-[0_0_20px_rgba(52,211,153,0.1)]"
+              )}>
+                <Fingerprint size={16} />
+                {prayersDone.length < 3 ? "Urgent: Reclaim your peace" : "Soul State: Luminous"}
+              </div>
+            </div>
+            
+            {/* Realistic Lantern/Soul Animation */}
+            <div className="relative w-40 h-40 flex items-center justify-center">
+              {/* Flickering Light Aura */}
+              <motion.div 
+                animate={{ 
+                  scale: [1, 1.2, 0.9, 1.1, 1],
+                  opacity: prayersDone.length === 5 ? [0.3, 0.6, 0.4, 0.7, 0.3] : [0.1, 0.3, 0.2, 0.4, 0.1],
+                }}
+                transition={{ duration: 0.5, repeat: Infinity, repeatType: "mirror" }}
+                className={cn(
+                  "absolute w-24 h-24 rounded-full blur-3xl",
+                  prayersDone.length < 3 ? "bg-rose-500" : "bg-emerald-400"
+                )}
+              />
+
+              {/* Lantern Structure */}
+              <div className="relative z-10 w-20 h-28 flex flex-col items-center">
+                <div className="w-8 h-2 bg-slate-800 rounded-full mb-1" />
+                <div className={cn(
+                  "w-16 h-20 rounded-2xl border-2 relative overflow-hidden flex items-center justify-center transition-colors duration-1000",
+                  prayersDone.length < 3 ? "border-rose-900/50 bg-rose-950/30" : "border-emerald-900/50 bg-emerald-950/30"
+                )}>
+                  {/* Internal Flame */}
+                  <motion.div 
+                    animate={{ 
+                      scale: prayersDone.length === 5 ? [1, 1.1, 0.9, 1] : [0.6, 0.8, 0.5, 0.6],
+                      y: [0, -2, 1, 0],
+                      opacity: prayersDone.length === 0 ? 0.2 : 1
+                    }}
+                    transition={{ duration: 0.2, repeat: Infinity }}
+                    className={cn(
+                      "w-8 h-12 rounded-full blur-sm",
+                      prayersDone.length < 3 ? "bg-gradient-to-t from-rose-600 to-orange-400" : "bg-gradient-to-t from-emerald-500 to-yellow-200"
+                    )}
+                  />
+                  
+                  {/* Glass Reflection */}
+                  <div className="absolute inset-0 bg-gradient-to-tr from-white/5 to-transparent pointer-events-none" />
+                </div>
+                <div className="w-12 h-3 bg-slate-800 rounded-b-xl mt-1" />
+              </div>
+
+              {/* Rising Smoke/Light Particles */}
+              <div className="absolute inset-0 pointer-events-none">
+                {[...Array(5)].map((_, i) => (
+                  <motion.div
+                    key={i}
+                    initial={{ y: 20, x: 0, opacity: 0, scale: 0 }}
+                    animate={{ 
+                      y: -80, 
+                      x: Math.sin(i) * 30,
+                      opacity: [0, 0.8, 0],
+                      scale: [0, 1.5, 0.5]
+                    }}
+                    transition={{ 
+                      duration: 3 + Math.random() * 2, 
+                      repeat: Infinity, 
+                      delay: i * 0.8 
+                    }}
+                    className={cn(
+                      "absolute bottom-1/4 left-1/2 w-1.5 h-1.5 rounded-full blur-[1px]",
+                      prayersDone.length < 3 ? "bg-rose-400/40" : "bg-emerald-400/40"
+                    )}
+                  />
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </motion.section>
+
+      {/* Prayer Schedule moved here */}
+      <motion.section 
+        initial="hidden"
+        animate="visible"
+        variants={{
+          visible: {
+            transition: {
+              staggerChildren: 0.1,
+              delayChildren: 0.2
+            }
+          }
+        }}
+        className="grid grid-cols-1 gap-3"
+      >
+        <div className="flex items-center justify-between px-2 mb-1">
+          <div className="flex items-center gap-2">
+            <h3 className="text-[11px] font-black text-slate-400 uppercase tracking-[0.3em]">Prayer Schedule</h3>
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
+              onClick={() => navigate('/settings')}
+              className="p-1.5 bg-slate-100 text-slate-500 rounded-lg hover:bg-emerald-50 hover:text-emerald-600 transition-all"
+            >
+              <SettingsIcon size={12} />
+            </motion.button>
+          </div>
+          <div className="h-[1px] flex-1 mx-4 bg-slate-100" />
+          <button 
+            onClick={() => navigate('/settings')}
+            className="text-[9px] font-black text-emerald-600 uppercase tracking-widest hover:underline"
+          >
+            Edit Timing
+          </button>
+        </div>
+        {prayerList.map((prayer) => (
+          <motion.div 
+            key={prayer.name}
+            variants={{
+              hidden: { opacity: 0, x: -20 },
+              visible: { opacity: 1, x: 0 }
+            }}
+            whileHover={{ scale: 1.02, x: 4 }}
+            whileTap={{ scale: 0.98 }}
+            className={cn(
+              "flex justify-between items-center p-5 rounded-[32px] border transition-all duration-500 group cursor-pointer relative overflow-hidden",
+              currentPrayer.toLowerCase() === prayer.name.toLowerCase() 
+                ? "bg-white border-emerald-100 shadow-xl shadow-emerald-900/5 ring-1 ring-emerald-50" 
+                : "bg-white/40 border-transparent hover:bg-white hover:border-slate-100"
+            )}
+          >
+            {currentPrayer.toLowerCase() === prayer.name.toLowerCase() && (
+              <div className="absolute inset-0 animate-shimmer pointer-events-none" />
+            )}
+
+            <div className="flex items-center gap-5">
+              <div className={cn(
+                "w-14 h-14 rounded-[22px] flex items-center justify-center transition-all duration-500 shadow-inner",
+                currentPrayer.toLowerCase() === prayer.name.toLowerCase() 
+                  ? "bg-emerald-600 text-white shadow-lg shadow-emerald-200" 
+                  : "bg-slate-50 text-slate-400 group-hover:bg-emerald-50 group-hover:text-emerald-500"
+              )}>
+                <Clock size={22} strokeWidth={2.5} />
+              </div>
+              <div>
+                <p className={cn(
+                  "font-black text-base tracking-tight",
+                  currentPrayer.toLowerCase() === prayer.name.toLowerCase() ? "text-emerald-900" : "text-slate-700"
+                )}>{prayer.name}</p>
+                <p className="text-[10px] text-slate-400 uppercase tracking-widest font-black mt-0.5">
+                  {currentPrayer.toLowerCase() === prayer.name.toLowerCase() ? "Current Prayer" : "Upcoming"}
+                </p>
+              </div>
+            </div>
+            <div className="text-right">
+              <p className={cn(
+                "text-2xl font-black tracking-tighter",
+                currentPrayer.toLowerCase() === prayer.name.toLowerCase() ? "text-emerald-600" : "text-slate-800"
+              )}>{format(prayer.time, 'hh:mm a')}</p>
+            </div>
+          </motion.div>
+        ))}
+      </motion.section>
+
+      {/* Hadith of the Day Section */}
+      <motion.section 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.4 }}
+        className="bg-white rounded-[48px] p-8 border border-slate-100 shadow-sm relative overflow-hidden group"
+      >
+        <div className="absolute top-0 left-0 p-8 opacity-[0.02] group-hover:opacity-5 transition-opacity">
+          <Quote size={120} />
+        </div>
+        
+        <div className="flex justify-between items-center mb-6 relative z-10">
+          <div className="flex items-center gap-2">
+            <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+            <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-[0.3em]">Hadith of the Day</h3>
+          </div>
+          <button onClick={() => navigate('/hadith')} className="text-[10px] font-black text-emerald-600 uppercase tracking-widest hover:underline">View Library</button>
+        </div>
+        <div className="relative z-10 space-y-4">
+          <div className="flex gap-4">
+            <Quote size={24} className="text-emerald-500 shrink-0 mt-0.5" />
+            <p className="text-base font-semibold text-slate-800 leading-relaxed">
+              "{dailyHadith.text}"
+            </p>
+          </div>
+          <div className="flex items-center justify-between pt-2 border-t border-slate-50 text-[10px] font-black uppercase tracking-widest text-slate-400">
+            <span>{dailyHadith.narrator}</span>
+            <span className="text-emerald-600">{dailyHadith.source}</span>
+          </div>
+        </div>
+      </motion.section>
+
+      {/* Dua of the Day */}
+      <motion.section 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.5 }}
+        className="bg-emerald-900 rounded-[48px] p-8 text-white relative overflow-hidden shadow-2xl shadow-emerald-900/40"
+      >
+        <div className="absolute inset-0 bg-islamic-pattern opacity-10" />
+        <div className="relative z-10">
+          <div className="flex justify-between items-center mb-6">
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
+              <h3 className="text-[11px] font-black text-emerald-200 uppercase tracking-[0.3em]">Featured Dua</h3>
+            </div>
+            <button onClick={() => navigate('/duas')} className="w-8 h-8 bg-white/10 rounded-full flex items-center justify-center hover:bg-white/20 transition-all">
+              <ChevronRight size={18} />
+            </button>
+          </div>
+          <div className="space-y-4">
+            <h4 className="text-xl font-black tracking-tight">{duaOfTheDay.title}</h4>
+            <p className="text-2xl font-arabic text-emerald-300 text-right leading-relaxed">{duaOfTheDay.arabic}</p>
+            <p className="text-xs text-emerald-100/70 font-medium leading-relaxed italic line-clamp-2">"{duaOfTheDay.meaning}"</p>
+          </div>
+        </div>
+      </motion.section>
+
+      <motion.section 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.6 }}
+        className="bg-white rounded-[48px] p-8 border border-slate-100 shadow-sm mb-10 relative overflow-hidden animate-float"
+      >
+        <div className="absolute top-0 right-0 p-8 opacity-5">
+          <Fingerprint size={120} />
+        </div>
+        
+        <div className="flex justify-between items-center mb-6 relative z-10">
+          <h3 className="text-[11px] font-black text-slate-800 uppercase tracking-[0.3em]">Daily Dhikr</h3>
+          <button 
+            onClick={() => navigate('/tasbih')}
+            className="w-8 h-8 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center hover:scale-110 transition-transform islamic-glow"
+          >
+            <ChevronRight size={18} strokeWidth={3} />
+          </button>
+        </div>
+        
+        <motion.div 
+          whileHover={{ y: -4, scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          className="p-8 bg-emerald-50 rounded-[40px] border border-emerald-100/50 relative overflow-hidden group cursor-pointer shadow-inner hover:shadow-emerald-100 transition-all duration-500" 
+          onClick={() => navigate('/tasbih')}
+        >
+          <div className="absolute inset-0 bg-islamic-pattern-dark opacity-[0.03]" />
+          <p className="text-emerald-900 font-arabic text-4xl text-right mb-6 leading-relaxed relative z-10">سُبْحَانَ اللَّهِ وَبِحَمْدِهِ</p>
+          <div className="relative z-10">
+            <p className="text-emerald-800 font-black text-lg mb-1 tracking-tight">SubhanAllah wa bihamdihi</p>
+            <p className="text-[12px] text-emerald-600/80 leading-relaxed font-bold uppercase tracking-wide">Glory be to Allah and His is the praise.</p>
+          </div>
+          
+          <div className="absolute -right-10 -bottom-10 w-32 h-32 bg-emerald-200/30 rounded-full blur-3xl group-hover:scale-150 transition-transform duration-1000 animate-glow" />
+        </motion.div>
+      </motion.section>
+      </div>
+    </div>
+  );
+}
+
